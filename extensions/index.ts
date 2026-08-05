@@ -9,6 +9,7 @@ const AUTONAME_MAX_WORDS = 10;
 const AUTONAME_MAX_CHARS = 90;
 const AUTONAME_SAMPLE_SIZE = 4;
 const AUTONAME_LOADING_LABEL = "Loading...";
+const HERDR_NEW_SESSION_LABEL = "New session";
 
 function formatSessionName(value: string): string {
 	return value.trim().replace(/\s+/g, " ").slice(0, AUTONAME_MAX_CHARS);
@@ -206,52 +207,64 @@ async function renameTab(pi: ExtensionAPI, label: string): Promise<void> {
 	}
 }
 
-function resolveTabLabel(pi: ExtensionAPI, explicitName?: string): string {
+function getInitialTabLabelForSession(reason?: string): string {
+	if (reason === "new") {
+		return HERDR_NEW_SESSION_LABEL;
+	}
+	return defaultTabLabel();
+}
+
+function resolveTabLabel(
+	pi: ExtensionAPI,
+	explicitName?: string,
+	options: { useSessionName?: boolean } = {}
+): string {
 	if (explicitName && explicitName.trim()) {
 		return formatSessionName(explicitName);
 	}
 
-	const currentSessionName = pi.getSessionName();
-	if (currentSessionName && currentSessionName.trim()) {
-		return formatSessionName(currentSessionName);
+	if (options.useSessionName !== false) {
+		const currentSessionName = pi.getSessionName();
+		if (currentSessionName && currentSessionName.trim()) {
+			return formatSessionName(currentSessionName);
+		}
 	}
 
 	fallbackTabLabel = fallbackTabLabel || defaultTabLabel();
 	return fallbackTabLabel;
 }
 
-async function applySessionBasedRename(pi: ExtensionAPI): Promise<void> {
+async function applySessionBasedRename(
+	pi: ExtensionAPI,
+	options: { useSessionName?: boolean } = {}
+): Promise<void> {
 	if (!HERDR_ENV_ENABLED || !HERDR_TAB_ID) {
 		return;
 	}
 
-	const currentSessionName = pi.getSessionName();
-	if (!currentSessionName || !currentSessionName.trim()) {
-		return;
-	}
-
+	const label = resolveTabLabel(pi, undefined, options);
 	try {
-		await renameTab(pi, currentSessionName);
+		await renameTab(pi, label);
 	} catch (error) {
 		console.error("Could not auto-rename herdr tab", error);
 	}
 }
 
 export default function (pi: ExtensionAPI) {
-	pi.on("session_start", () => {
-		fallbackTabLabel = defaultTabLabel();
-		void applySessionBasedRename(pi);
+	pi.on("session_start", (event) => {
+		fallbackTabLabel = getInitialTabLabelForSession(event?.reason);
+		void applySessionBasedRename(pi, {
+			useSessionName: event?.reason !== "new",
+		});
 	});
 
 	pi.on("session_info_changed", (event) => {
 		if (!HERDR_ENV_ENABLED || !HERDR_TAB_ID) {
 			return;
 		}
-		if (!event.name || !event.name.trim()) {
-			return;
-		}
-
-		const label = formatSessionName(event.name);
+		const label = resolveTabLabel(pi, event.name, {
+			useSessionName: true,
+		});
 		void renameTab(pi, label).catch(() => {
 			// Avoid breaking the extension chain if herdr command fails transiently.
 		});
