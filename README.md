@@ -1,4 +1,4 @@
-# pi-autoname
+# pi-session-autoname
 
 Pi extension for naming sessions and herdr tabs.
 
@@ -24,7 +24,7 @@ Pi extension for naming sessions and herdr tabs.
 ### Option 1: pi package
 
 ```bash
-pi install /absolute/path/to/pi-autoname
+pi install /absolute/path/to/pi-session-autoname
 ```
 
 Then reload Pi:
@@ -36,7 +36,19 @@ Then reload Pi:
 ### Option 2: local extension directory
 
 ```bash
-cp -r pi-autoname ~/.pi/agent/extensions/
+cp -r pi-session-autoname ~/.pi/agent/extensions/
+```
+
+Then reload Pi:
+
+```text
+/reload
+```
+
+### Option 3: npm package
+
+```bash
+pi install npm:pi-session-autoname
 ```
 
 Then reload Pi:
