@@ -1,8 +1,10 @@
 import { complete } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 
-const HERDR_TAB_ID = process.env.HERDR_TAB_ID;
-const HERDR_ENV_ENABLED = process.env.HERDR_ENV === "1";
+const LEGACY_HERDR_TAB_ID = process.env.HERDR_TAB_ID;
+const LEGACY_HERDR_ENV_ENABLED = process.env.HERDR_ENV === "1";
+const HC_TERMINAL_ID = process.env.HC_TERMINAL_ID;
+let newHerdrTabId: string | null | undefined;
 let fallbackTabLabel = defaultTabLabel();
 
 const AUTONAME_MAX_WORDS = 10;
@@ -184,26 +186,65 @@ async function applyAutoName(pi: ExtensionAPI, ctx: ExtensionCommandContext): Pr
 	return generatedName;
 }
 
-async function renameHerdrIfAvailable(pi: ExtensionAPI, label: string): Promise<void> {
+type HerdrTarget =
+	| { kind: "legacy"; tabId: string }
+	| { kind: "app"; tabId: string };
+
+async function getNewHerdrTabId(pi: ExtensionAPI): Promise<string | undefined> {
+	if (!HC_TERMINAL_ID) {
+		return undefined;
+	}
+
+	if (newHerdrTabId !== undefined) {
+		return newHerdrTabId ?? undefined;
+	}
+
+	const { code, stderr, stdout } = await pi.exec("hc", ["get", HC_TERMINAL_ID, "--json"]);
+	if (code !== 0) {
+		throw new Error(stderr || stdout || `hc exited with code ${code}`);
+	}
+
 	try {
-		await renameTab(pi, label);
-	} catch (error) {
-		if (!HERDR_ENV_ENABLED) {
-			return;
-		}
-		throw error;
+		const terminal = JSON.parse(stdout) as { labels?: Record<string, unknown> };
+		const tabId = terminal.labels?.["herdr.tab"];
+		newHerdrTabId = typeof tabId === "string" && tabId.trim() ? tabId : null;
+	} catch {
+		throw new Error("hc returned invalid terminal data");
+	}
+
+	return newHerdrTabId ?? undefined;
+}
+
+async function getHerdrTarget(pi: ExtensionAPI): Promise<HerdrTarget | undefined> {
+	if (LEGACY_HERDR_ENV_ENABLED && LEGACY_HERDR_TAB_ID) {
+		return { kind: "legacy", tabId: LEGACY_HERDR_TAB_ID };
+	}
+
+	const tabId = await getNewHerdrTabId(pi);
+	return tabId ? { kind: "app", tabId } : undefined;
+}
+
+async function renameHerdrIfAvailable(pi: ExtensionAPI, label: string): Promise<void> {
+	const target = await getHerdrTarget(pi);
+	if (target) {
+		await renameTab(pi, label, target);
 	}
 }
 
-async function renameTab(pi: ExtensionAPI, label: string): Promise<void> {
-	if (!HERDR_ENV_ENABLED || !HERDR_TAB_ID) {
+async function renameTab(pi: ExtensionAPI, label: string, target?: HerdrTarget): Promise<void> {
+	const resolvedTarget = target ?? (await getHerdrTarget(pi));
+	if (!resolvedTarget) {
 		throw new Error("herdr was not detected in this session. Use a herdr tab.");
 	}
 
 	const normalized = formatSessionName(label);
-	const { code, stderr, stdout } = await pi.exec("herdr", ["tab", "rename", HERDR_TAB_ID, normalized]);
+	const command =
+		resolvedTarget.kind === "legacy"
+			? { program: "herdr", args: ["tab", "rename", resolvedTarget.tabId, normalized] }
+			: { program: "herdr-app", args: ["do", "tab.rename", "--id", resolvedTarget.tabId, "--name", normalized] };
+	const { code, stderr, stdout } = await pi.exec(command.program, command.args);
 	if (code !== 0) {
-		throw new Error(stderr || stdout || `herdr exited with code ${code}`);
+		throw new Error(stderr || stdout || `${command.program} exited with code ${code}`);
 	}
 }
 
@@ -238,13 +279,9 @@ async function applySessionBasedRename(
 	pi: ExtensionAPI,
 	options: { useSessionName?: boolean } = {}
 ): Promise<void> {
-	if (!HERDR_ENV_ENABLED || !HERDR_TAB_ID) {
-		return;
-	}
-
 	const label = resolveTabLabel(pi, undefined, options);
 	try {
-		await renameTab(pi, label);
+		await renameHerdrIfAvailable(pi, label);
 	} catch (error) {
 		console.error("Could not auto-rename herdr tab", error);
 	}
@@ -259,13 +296,10 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("session_info_changed", (event) => {
-		if (!HERDR_ENV_ENABLED || !HERDR_TAB_ID) {
-			return;
-		}
 		const label = resolveTabLabel(pi, event.name, {
 			useSessionName: true,
 		});
-		void renameTab(pi, label).catch(() => {
+		void renameHerdrIfAvailable(pi, label).catch(() => {
 			// Avoid breaking the extension chain if herdr command fails transiently.
 		});
 	});

@@ -17,7 +17,8 @@ Pi extension for naming sessions and herdr tabs.
   - last 4 messages
 - includes only conversation messages (`user` and `assistant`)
 - excludes tool outputs
-- renames the herdr tab to `Loading...` while the title is being generated
+- renames the Herdr tab to `Loading...` while the title is being generated
+- supports both the legacy Herdr CLI and Herdr App: in Herdr App it resolves `$HC_TERMINAL_ID` with `hc get` and renames the associated `herdr.tab` using `herdr-app do tab.rename`
 
 ## Install
 
@@ -66,5 +67,6 @@ Then reload Pi:
 ## Notes
 
 - `/auto-name` requires an active model.
-- If you are not in a herdr tab, only the Pi session name is updated.
+- If you are not in a Herdr tab, only the Pi session name is updated.
+- Legacy Herdr is detected with `HERDR_ENV=1` and `HERDR_TAB_ID`. Herdr App is detected when `$HC_TERMINAL_ID` identifies a terminal labelled with `herdr.tab`.
 - Herdr auto-rename avoids showing the fallback tab label while an auto-generated name is still pending.
